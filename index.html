@@ -1180,6 +1180,7 @@ textarea.inp{height:auto;min-height:88px;resize:vertical;font-family:var(--font-
 .confirm{width:440px;max-width:100%;display:flex;flex-direction:column;background:var(--color-elevation-surface-overlay-default);border:1px solid var(--color-border-default);border-radius:var(--radius-4);box-shadow:var(--shadow-md);overflow:hidden}
 .confirm .ch{padding:16px 24px;font-weight:500;border-bottom:1px solid var(--color-border-default)}
 .confirm .cb2{padding:24px;background:var(--color-elevation-surface-overlay-darker);color:var(--color-text-subtle)}
+.dl-grp{margin-top:8px}.dl-grp b{font-weight:500;color:var(--color-text-default)}.dl-grp ul{margin:4px 0 0;padding-left:20px;max-height:160px;overflow:auto}
 .confirm .cf{display:flex;justify-content:flex-end;gap:8px;padding:20px 24px}
 .toast{position:absolute;left:50%;bottom:24px;z-index:30;width:420px;max-width:calc(100% - 32px);transform:translateX(-50%);display:flex;align-items:flex-start;gap:12px;padding:12px 16px;border-radius:var(--radius-4);border:1px solid var(--color-border-success-default);background:var(--color-background-success-default);box-shadow:var(--inset-accent-success),var(--shadow-md);font-weight:500;color:var(--color-text-bold);transition:opacity var(--motion-base)}
 .toast[hidden]{display:none}
@@ -1211,10 +1212,7 @@ textarea.inp{height:auto;min-height:88px;resize:vertical;font-family:var(--font-
       <div class="acts">
         <button class="btn" type="button" id="resetBtn" title="Prototype only">Reset to out of the box</button>
         <button class="btn" type="button" id="demoBtn" title="Prototype only"><span class="ui-icon-plus"></span>Add demo sources</button>
-        <button class="btn" type="button" id="importBtn"><span class="ui-icon-upload"></span>Import JSON</button>
-        <button class="btn" type="button" id="exportBtn"><span class="ui-icon-download"></span>Export JSON</button>
       </div>
-      <input type="file" id="importFile" accept="application/json" hidden>
     </div>
 
     <div style="flex:1;display:flex;min-height:0">
@@ -1499,9 +1497,11 @@ function toast(text, type) {
   clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3200);
 }
 let confirmYes = null;
-function ask({ title, body, yes, yesText = 'Delete', danger = true, onlyOk = false }) {
-  $('cTitle').textContent = title; $('cBody').textContent = body;
+function ask({ title, body, bodyHtml, yes, yesText = 'Delete', noText = 'Cancel', danger = true, onlyOk = false }) {
+  $('cTitle').textContent = title;
+  if (bodyHtml) $('cBody').innerHTML = bodyHtml; else $('cBody').textContent = body;
   $('cYes').textContent = yesText; $('cYes').className = 'btn ' + (danger ? 'danger' : 'primary');
+  $('cNo').textContent = noText;
   $('cNo').hidden = onlyOk; confirmYes = yes; $('confirm').hidden = false; $('cYes').focus();
 }
 $('cNo').onclick = () => { $('confirm').hidden = true; };
@@ -1635,7 +1635,23 @@ function askDelete(kind, item) {
   if (item.system) return toast(`${item.name} is built in and can't be deleted. Disable it to hide it from operators.`, 'info');
   if (kind === 'connection') {
     const used = cfg.basemaps.filter(b => b.conn === item.id).length + cfg.layers.filter(l => l.conn === item.id).length;
-    if (used) return ask({ title: 'Connection in use', body: `${item.name} is used by ${used} basemap(s) or layer(s). Move or delete them first, or disable the connection to hide them from operators.`, yesText: 'OK', danger: false, onlyOk: true });
+    if (used) {
+      const bms = cfg.basemaps.filter(b => b.conn === item.id), lys = cfg.layers.filter(l => l.conn === item.id);
+      const group = (title, xs) => xs.length ? `<div class="dl-grp"><b>${title} (${xs.length})</b><ul>${xs.map(x => `<li>${esc(x.name)}</li>`).join('')}</ul></div>` : '';
+      return ask({
+        title: 'Connection in use',
+        bodyHtml: `<p style="margin:0 0 12px">${esc(item.name)} is used by:</p>${group('Basemaps', bms)}${group('Layers', lys)}<p style="margin:12px 0 0">Do you want to delete the connection and all of these items?</p>`,
+        yesText: 'Yes, delete all', noText: 'No, keep it',
+        yes: () => {
+          cfg.basemaps = cfg.basemaps.filter(b => b.conn !== item.id);
+          cfg.layers = cfg.layers.filter(l => l.conn !== item.id);
+          cfg.connections.splice(cfg.connections.indexOf(item), 1);
+          if (editing && (editing.item === item || editing.item?.conn === item.id)) closeEditor();
+          save(); render(); rebuildMap();
+          toast(`${item.name} was deleted, with ${bms.length} basemap(s) and ${lys.length} layer(s)`);
+        }
+      });
+    }
   }
   ask({ title: 'Delete ' + kind, body: `Are you sure you want to delete ${kind} ${item.name}? To hide it from operators but keep it, disable it instead.`, yes: () => {
     const list = listFor(kind); list.splice(list.indexOf(item), 1);
@@ -1822,21 +1838,7 @@ $('dGrip').addEventListener('mousedown', e => {
   document.body.style.cursor = 'col-resize'; addEventListener('mousemove', move); addEventListener('mouseup', up);
 });
 
-/* ---------- export / import / reset ---------- */
-$('exportBtn').onclick = () => {
-  const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
-  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'gis-config.json' });
-  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-};
-$('importBtn').onclick = () => $('importFile').click();
-$('importFile').onchange = async e => {
-  try {
-    const c = JSON.parse(await e.target.files[0].text());
-    if (!Array.isArray(c.connections) || !Array.isArray(c.basemaps) || !Array.isArray(c.layers)) throw 0;
-    cfg = normalize(c); save(); closeEditor(); rebuildMap(); toast('Configuration was imported');
-  } catch (err) { toast('Not a valid config file', 'error'); }
-  e.target.value = '';
-};
+/* ---------- reset / demo data (prototype only) ---------- */
 $('resetBtn').onclick = () => ask({ title: 'Reset to out of the box', body: 'Are you sure you want to replace your connections, basemaps and layers with the built-in Google Maps setup?', yesText: 'Reset', yes: () => {
   cfg = outOfBox(); Object.keys(status).forEach(k => delete status[k]); save(); closeEditor(); rebuildMap(); toast('The out-of-the-box Google Maps setup was restored');
 } });
