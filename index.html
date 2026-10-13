@@ -1057,6 +1057,16 @@ table.t tr:last-child td{border-bottom:none}
 table.t tbody tr{cursor:pointer;transition:background var(--motion-base)}
 table.t tbody tr:hover{background:var(--color-background-neutral-subtlest-50900)}
 table.t tbody tr.sel{background:var(--color-background-selected-active)}
+table.t td.drag,table.t th.drag{width:1%;padding:0 0 0 8px}
+.handle{display:inline-flex;align-items:center;justify-content:center;width:24px;height:32px;padding:0;border:none;border-radius:4px;background:transparent;color:var(--color-icon-default);cursor:grab}
+.handle:hover{background:var(--color-background-button-tertiary-gray-hover)}
+.handle:focus-visible{outline:2px solid var(--color-border-selected-default)}
+.handle span{font-size:16px}
+table.t tr.dragging{opacity:.4}
+table.t tr.drop-before td{box-shadow:inset 0 2px 0 var(--color-border-selected-default)}
+table.t tr.drop-after td{box-shadow:inset 0 -2px 0 var(--color-border-selected-default)}
+table.t tr.off td:not(.keep):not(.acts):not(.drag){opacity:.45}
+.hidden-note{font-size:11px;line-height:16px;padding:1px 6px;border-radius:4px;background:var(--color-background-neutral-default-200700);color:var(--color-text-subtle)}
 table.t td.acts{width:1%;padding:0 8px}
 table.t .acts>div{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity var(--motion-base)}
 table.t tr:hover .acts>div,table.t .acts>div:focus-within{opacity:1}
@@ -1065,6 +1075,8 @@ table.t tr:hover .acts>div,table.t .acts>div:focus-within{opacity:1}
 .status{display:inline-flex;align-items:center;gap:8px;font-size:12px;line-height:20px;color:var(--color-text-subtle)}
 .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--color-text-subtlest)}
 .dot.ok{background:var(--color-secondary-green-500)}.dot.err{background:var(--color-icon-alert)}.dot.run{background:var(--color-icon-warning)}
+.badge.neutral{background:var(--color-background-neutral-default-200700);color:var(--color-text-subtle);font-weight:500}
+.ro{min-height:40px;display:flex;align-items:center;padding:0 16px;border-radius:var(--radius-4);border:1px solid var(--color-border-default);background:var(--color-background-input-read-only);color:var(--color-text-subtle)}
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:var(--radius-10);font-size:11px;font-weight:600;line-height:1.5;background:var(--color-background-information-default);color:var(--color-text-primary-default)}
 .chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:4px;font-size:12px;line-height:20px;font-weight:500}
 .chip.wms{background:var(--color-background-accent-blue-subtle);color:var(--color-text-accent-blue)}
@@ -1197,7 +1209,8 @@ textarea.inp{height:auto;min-height:88px;resize:vertical;font-family:var(--font-
       <span class="ui-icon-expand-arrow chev" aria-hidden="true"></span>
       <span class="crumb">GIS and maps</span>
       <div class="acts">
-        <button class="btn" type="button" id="resetBtn">Reset to samples</button>
+        <button class="btn" type="button" id="resetBtn" title="Prototype only">Reset to out of the box</button>
+        <button class="btn" type="button" id="demoBtn" title="Prototype only"><span class="ui-icon-plus"></span>Add demo sources</button>
         <button class="btn" type="button" id="importBtn"><span class="ui-icon-upload"></span>Import JSON</button>
         <button class="btn" type="button" id="exportBtn"><span class="ui-icon-download"></span>Export JSON</button>
       </div>
@@ -1269,41 +1282,75 @@ textarea.inp{height:auto;min-height:88px;resize:vertical;font-family:var(--font-
    Config model (kept in this browser; Export / Import as JSON)
    ========================================================= */
 const STORE = 'gis-admin-phase1';
-const SAMPLE = {
+// Out of the box: the Google Maps setup every organization has today, as built-in items (can be renamed, reordered and disabled, not deleted).
+// The built-in Google layers start disabled; admins enable the ones they want.
+const BUILTIN = {
+  connections: [
+    { id: 'gmaps', system: true, name: 'Google Maps', provider: 'google', url: 'https://tile.googleapis.com', auth: { type: 'none' }, google: { key: '', language: 'en-US', region: 'US' } }
+  ],
+  basemaps: [
+    { id: 'g-roadmap',   system: true, name: 'Google Maps', conn: 'gmaps', google: { mapType: 'roadmap', styles: '' } },
+    { id: 'g-satellite', system: true, name: 'Satellite',   conn: 'gmaps', google: { mapType: 'satellite', styles: '' } },
+    { id: 'g-terrain',   system: true, name: 'Terrain',     conn: 'gmaps', google: { mapType: 'terrain', styles: '' } }
+  ],
+  layers: [
+    { id: 'g-traffic',   system: true, enabled: false, name: 'Traffic',   type: 'google', conn: 'gmaps', overlay: 'layerTraffic', opacity: 1, visible: false },
+    { id: 'g-bicycling', system: true, enabled: false, name: 'Bicycling', type: 'google', conn: 'gmaps', overlay: 'bicycling',    opacity: 1, visible: false },
+    { id: 'g-transit',   system: true, enabled: false, name: 'Transit',   type: 'google', conn: 'gmaps', overlay: 'transit',      opacity: 1, visible: false }
+  ]
+};
+// Demo sources for testing the generic paths (prototype only)
+const DEMO = {
   connections: [
     { id: 'esri',    name: 'Esri ArcGIS Online', url: 'https://server.arcgisonline.com/ArcGIS/rest/services', auth: { type: 'none' } },
     { id: 'demo',    name: 'GeoServer demo',     url: 'https://ahocevar.com/geoserver',                     auth: { type: 'none' } },
     { id: 'mesonet', name: 'Iowa Mesonet',       url: 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi', auth: { type: 'none' } },
-    { id: 'gibs',    name: 'NASA GIBS',          url: 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', auth: { type: 'none' } },
-    { id: 'google',  name: 'Google Maps',        provider: 'google', url: 'https://tile.googleapis.com', auth: { type: 'none' }, google: { key: '', language: 'en-US', region: 'US' } }
+    { id: 'gibs',    name: 'NASA GIBS',          url: 'https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi', auth: { type: 'none' } }
   ],
   basemaps: [
     { id: 'dark',  name: 'Dark gray',  conn: 'esri', path: '/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',  maxzoom: 16, attribution: 'Tiles © Esri' },
     { id: 'light', name: 'Light gray', conn: 'esri', path: '/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', maxzoom: 16, attribution: 'Tiles © Esri' },
-    { id: 'sat',   name: 'Satellite',  conn: 'esri', path: '/World_Imagery/MapServer/tile/{z}/{y}/{x}',                maxzoom: 19, attribution: 'Tiles © Esri, Maxar' },
-    { id: 'groad', name: 'Google roadmap', conn: 'google', google: { mapType: 'roadmap', styles: '' } },
-    { id: 'ghyb',  name: 'Google satellite with labels', conn: 'google', google: { mapType: 'hybrid', styles: '' } }
+    { id: 'sat',   name: 'Esri satellite', conn: 'esri', path: '/World_Imagery/MapServer/tile/{z}/{y}/{x}',            maxzoom: 19, attribution: 'Tiles © Esri, Maxar' }
   ],
-  defaultBasemap: 'dark',
   layers: [
     { id: 'radar',  name: 'Weather radar (US)', type: 'wms', conn: 'mesonet', path: '',     layerName: 'nexrad-n0r-900913', format: 'image/png', opacity: 0.8, visible: true,  color: '#f59e0b' },
     { id: 'modis',  name: 'Satellite (MODIS)',  type: 'wms', conn: 'gibs',    path: '',     layerName: 'MODIS_Terra_CorrectedReflectance_TrueColor', format: 'image/jpeg', opacity: 0.7, visible: false, color: '#22c55e' },
     { id: 'states', name: 'US states',          type: 'wfs', conn: 'demo',    path: '/wfs', layerName: 'topp:states',       opacity: 1,   visible: true,  color: '#4367f6' },
     { id: 'roads',  name: 'Manhattan roads',    type: 'wfs', conn: 'demo',    path: '/wfs', layerName: 'tiger:tiger_roads', opacity: 1,   visible: false, color: '#ec4899' },
-    { id: 'poi',    name: 'Manhattan POIs',     type: 'wfs', conn: 'demo',    path: '/wfs', layerName: 'tiger:poi',         opacity: 1,   visible: false, color: '#eab308' },
-    { id: 'gtraffic', name: 'Google traffic',   type: 'google', conn: 'google', overlay: 'layerTraffic', opacity: 1, visible: false }
+    { id: 'poi',    name: 'Manhattan POIs',     type: 'wfs', conn: 'demo',    path: '/wfs', layerName: 'tiger:poi',         opacity: 1,   visible: false, color: '#eab308' }
   ]
 };
+const outOfBox = () => structuredClone(BUILTIN);
 let cfg = load();
 const status = {};      // id -> {cls, text}
 let tab = 'connections';
-let editing = null;     // {kind, item, draft, isDefault, tried}
+let editing = null;     // {kind, item, draft, tried}
 const $ = id => document.getElementById(id);
 
 function load() {
-  try { const s = localStorage.getItem(STORE); if (s) { const c = JSON.parse(s); if (c && Array.isArray(c.connections)) return c; } } catch (e) {}
-  return structuredClone(SAMPLE);
+  try { const s = localStorage.getItem(STORE); if (s) { const c = JSON.parse(s); if (c && Array.isArray(c.connections)) return normalize(c); } } catch (e) {}
+  return outOfBox();
 }
+// Older setups kept a separate defaultBasemap id. Now the top basemap is the default, so move it to the top once.
+function normalize(c) {
+  if (c.defaultBasemap) {
+    const i = c.basemaps.findIndex(b => b.id === c.defaultBasemap);
+    if (i > 0) c.basemaps.unshift(...c.basemaps.splice(i, 1));
+    delete c.defaultBasemap;
+  }
+  // Migration: a setup without the built-in Google items gets them, at the top so Google Maps stays the default
+  if (!c.connections.some(x => x.system)) {
+    const oldDemoGoogle = ['google', 'groad', 'ghyb', 'gtraffic'];  // earlier prototype versions
+    ['connections', 'basemaps', 'layers'].forEach(k => {
+      c[k] = [...structuredClone(BUILTIN[k]), ...c[k].filter(x => !oldDemoGoogle.includes(x.id))];
+    });
+  }
+  return c;
+}
+/* enable / disable: a disabled item is hidden from operators; a basemap or layer is also hidden when its connection is disabled */
+const isOn = x => !!x && x.enabled !== false;
+const live = x => isOn(x) && isOn(conn(x.conn));
+const defaultBase = () => cfg.basemaps.find(live);
 function save() { try { localStorage.setItem(STORE, JSON.stringify(cfg)); } catch (e) {} }
 const uid = () => Math.random().toString(36).slice(2, 9);
 const conn = id => cfg.connections.find(c => c.id === id);
@@ -1329,7 +1376,10 @@ const AUTH_LABEL = { none: 'None', key: 'API key', basic: 'Basic (user / passwor
 const GURL = 'https://tile.googleapis.com';
 function isGoogle(c) { return !!c && c.provider === 'google'; }
 const GMAPTYPES = [['roadmap', 'Roadmap'], ['satellite', 'Satellite'], ['hybrid', 'Satellite with labels'], ['terrain', 'Terrain']];
-const GOVERLAYS = [['layerTraffic', 'Traffic'], ['layerRoadmap', 'Roads and labels'], ['layerStreetview', 'Street View coverage']];
+const GOVERLAYS = [['layerTraffic', 'Traffic'], ['bicycling', 'Bicycling'], ['transit', 'Transit'], ['layerRoadmap', 'Roads and labels'], ['layerStreetview', 'Street View coverage']];
+// Overlays the Map Tiles API can draw. Bicycling and transit exist only in the Google Maps JavaScript API.
+const TILE_OVERLAYS = ['layerTraffic', 'layerRoadmap', 'layerStreetview'];
+const JSAPI_NOTE = 'Not in this preview: drawn by the Google Maps JavaScript API';
 const sessions = {};  // cache key -> {session, expiry, tileWidth, key}
 function basemapBody(b) {
   const t = b.google?.mapType || 'roadmap';
@@ -1341,7 +1391,7 @@ function basemapBody(b) {
 const overlayBody = l => ({ mapType: 'roadmap', layerTypes: [l.overlay || 'layerTraffic'], overlay: true });
 async function gSession(c, opts) {
   const key = c?.google?.key;
-  if (!key) throw new Error('Add an API key to the ' + (c?.name || 'Google') + ' connection');
+  if (!key) throw new Error(c?.system ? 'Add a test API key to the built-in ' + c.name + ' connection to preview Google maps' : 'Add an API key to the ' + (c?.name || 'Google') + ' connection');
   const g = c.google || {};
   const body = { mapType: opts.mapType || 'roadmap', language: g.language || 'en-US', region: String(g.region || 'US').toUpperCase(), scale: 'scaleFactor1x' };
   if (opts.layerTypes?.length) body.layerTypes = opts.layerTypes;
@@ -1407,6 +1457,7 @@ function testBasemap(b) {
 }
 async function testLayer(l) {
   const c = conn(l.conn); if (!c) return { cls: 'err', text: 'No connection' };
+  if (l.type === 'google' && !TILE_OVERLAYS.includes(l.overlay)) return { cls: 'run', text: JSAPI_NOTE };
   if (l.type === 'google') return isGoogle(c) ? gTest(() => gSession(c, overlayBody(l))) : { cls: 'err', text: 'Choose a Google Maps connection' };
   if (!l.layerName)return { cls: 'err', text: 'Layer name is required' };
   if (l.type === 'wms') return probe(capsUrl(c, l.path, 'WMS'), authParts(c).headers);
@@ -1459,34 +1510,39 @@ $('cYes').onclick = () => { $('confirm').hidden = true; confirmYes && confirmYes
 /* =========================================================
    Tabs + tables
    ========================================================= */
-const TABS = [['connections', 'Connections', 'ui-icon-connected', 'connection', 'A server address plus its credentials. Basemaps and layers reuse them'],
-  ['basemaps', 'Basemaps', 'ui-icon-globe', 'basemap', 'Background maps (XYZ tiles). The default one loads first'],
-  ['layers', 'Layers', 'ui-icon-stream', 'layer', 'WMS layers are images drawn by the server. WFS layers are features drawn in the browser']];
+const TABS = [['connections', 'Connections', 'ui-icon-connected', 'connection', 'A server address plus its credentials. Basemaps and layers reuse them. Disable a connection to hide everything that uses it'],
+  ['basemaps', 'Basemaps', 'ui-icon-globe', 'basemap', 'Background maps (XYZ tiles). Drag to reorder: the top enabled basemap is the default and loads first'],
+  ['layers', 'Layers', 'ui-icon-stream', 'layer', 'Drag to reorder: layers higher in the list draw above the ones below. WMS layers are images drawn by the server, WFS layers are features drawn in the browser']];
 const kindOfTab = () => TABS.find(t => t[0] === tab)[3];
 
 function stat(id) { const s = status[id]; return `<span class="status"><span class="dot ${s ? s.cls : ''}"></span>${esc(s ? s.text : 'Not tested')}</span>`; }
-const acts = (kind, id, extra = '') => `<td class="acts"><div>${extra}<button class="ibtn" type="button" title="Test ${kind}" aria-label="Test" data-test="${id}"><span class="ui-icon-connected"></span></button><button class="ibtn alert" type="button" title="Delete ${kind}" aria-label="Delete" data-del="${id}"><span class="ui-icon-delete"></span></button></div></td>`;
+const acts = (kind, id, extra = '') => { const sys = listFor(kind).find(x => x.id === id)?.system; return `<td class="acts"><div>${extra}<button class="ibtn" type="button" title="Test ${kind}" aria-label="Test" data-test="${id}"><span class="ui-icon-connected"></span></button>${sys ? '<span style="width:32px"></span>' : `<button class="ibtn alert" type="button" title="Delete ${kind}" aria-label="Delete" data-del="${id}"><span class="ui-icon-delete"></span></button>`}</div></td>`; };
+const bi = x => x.system ? '<span class="badge neutral" title="Part of the Google Maps setup every organization has. Rename, reorder or disable it; it cannot be deleted">Built-in</span>' : '';
 const nameCell = (id, name, pre = '', post = '') => `<td><div style="display:flex;align-items:center;gap:8px">${pre}<button class="rowname" type="button" data-open="${id}">${esc(name)}</button>${post}</div></td>`;
-const selCls = id => editing && editing.item && editing.item.id === id ? ' class="sel"' : '';
+const rowAttrs = (x, drag) => `data-row="${x.id}"${drag ? ' draggable="true"' : ''} class="${[editing && editing.item && editing.item.id === x.id ? 'sel' : '', isOn(x) && (!('conn' in x) || isOn(conn(x.conn))) ? '' : 'off'].join(' ').trim()}"`;
+const handle = (x) => `<td class="drag"><button class="handle" type="button" data-handle="${x.id}" title="Drag to reorder" aria-label="Reorder ${esc(x.name)}. Use the up and down arrow keys"><span class="ui-icon-drag-handle"></span></button></td>`;
+const enCell = (x, kind) => `<td class="keep"><button class="tgl" type="button" role="switch" aria-checked="${isOn(x)}" aria-label="${esc(x.name)} enabled" title="${isOn(x) ? 'Visible to operators' : 'Hidden from operators'}" data-en="${x.id}"><span class="tr"></span><span class="th"></span></button></td>`;
+const connHidden = x => isOn(x) && !isOn(conn(x.conn)) ? '<span class="hidden-note">Connection disabled</span>' : '';
 function nodata(title, desc, btn) { return `<div class="nodata"><h3>${title}</h3><p>${desc}</p><button class="btn primary" type="button" data-add="1"><span class="ui-icon-plus"></span>${btn}</button></div>`; }
 
 function render() {
   $('tabs').innerHTML = TABS.map(([k, l, i]) => `<button class="tab" type="button" role="tab" aria-selected="${tab === k}" data-tab="${k}"><span class="${i}"></span><span>${l}</span><span class="pill">${cfg[k].length}</span></button>`).join('');
   const T = TABS.find(t => t[0] === tab);
   $('addLbl').textContent = 'Add ' + T[3]; $('tabHelp').textContent = T[4];
+  const th = `<th class="drag"><span class="vh">Order</span></th>`;
   let h = '';
   if (tab === 'connections') {
-    h = cfg.connections.length ? `<table class="t"><thead><tr><th>Name</th><th>Provider</th><th>Authentication</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
-      cfg.connections.map(c => `<tr data-row="${c.id}"${selCls(c.id)}>${nameCell(c.id, c.name)}<td>${isGoogle(c) ? 'Google Maps Platform' : 'Generic'}</td><td>${isGoogle(c) ? (c.google?.key ? 'API key' : '<span style="color:var(--color-text-alert-default)">API key missing</span>') : esc(AUTH_LABEL[c.auth?.type || 'none'])}</td><td>${stat(c.id)}</td>${acts('connection', c.id)}</tr>`).join('')}</tbody></table>`
+    h = cfg.connections.length ? `<table class="t"><thead><tr><th>Name</th><th>Enabled</th><th>Provider</th><th>Authentication</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
+      cfg.connections.map(c => `<tr ${rowAttrs(c, false)}>${nameCell(c.id, c.name, '', bi(c))}${enCell(c)}<td>${isGoogle(c) ? 'Google Maps Platform' : 'Generic'}</td><td>${isGoogle(c) ? (c.system ? 'Lumana-managed key' : c.google?.key ? 'API key' : '<span style="color:var(--color-text-alert-default)">API key missing</span>') : esc(AUTH_LABEL[c.auth?.type || 'none'])}</td><td>${stat(c.id)}</td>${acts('connection', c.id)}</tr>`).join('')}</tbody></table>`
       : nodata('No connections yet', 'Connections hold a server address and its credentials, so basemaps and layers can reuse them.', 'Add connection');
   } else if (tab === 'basemaps') {
-    h = cfg.basemaps.length ? `<table class="t"><thead><tr><th>Name</th><th>Connection</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
-      cfg.basemaps.map(b => { const def = cfg.defaultBasemap === b.id; return `<tr data-row="${b.id}"${selCls(b.id)}>${nameCell(b.id, b.name, '', def ? '<span class="badge">Default</span>' : '')}<td>${esc(conn(b.conn)?.name || '—')}</td><td>${stat(b.id)}</td>${
-        acts('basemap', b.id, def ? '' : `<button class="btn link" type="button" data-def="${b.id}">Set as default</button>`)}</tr>`; }).join('')}</tbody></table>`
+    const def = defaultBase();
+    h = cfg.basemaps.length ? `<table class="t"><thead><tr>${th}<th>Name</th><th>Enabled</th><th>Connection</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
+      cfg.basemaps.map(b => `<tr ${rowAttrs(b, true)}>${handle(b)}${nameCell(b.id, b.name, '', (def === b ? '<span class="badge">Default</span>' : '') + bi(b) + connHidden(b))}${enCell(b)}<td>${esc(conn(b.conn)?.name || '—')}</td><td>${stat(b.id)}</td>${acts('basemap', b.id)}</tr>`).join('')}</tbody></table>`
       : nodata('No basemaps yet', 'Basemaps are the background maps your operators see under every layer.', 'Add basemap');
   } else {
-    h = cfg.layers.length ? `<table class="t"><thead><tr><th>Name</th><th>Type</th><th>Connection</th><th>Layer name</th><th>On at start</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
-      cfg.layers.map(l => { const ln = l.type === 'google' ? (GOVERLAYS.find(o => o[0] === l.overlay)?.[1] || '') : l.layerName; return `<tr data-row="${l.id}"${selCls(l.id)}>${nameCell(l.id, l.name, `<span class="sw" style="background:${esc(layerColor(l))}"></span>`)}<td><span class="chip ${l.type}">${l.type.toUpperCase()}</span></td><td>${esc(conn(l.conn)?.name || '—')}</td><td><div class="sub-txt" title="${esc(ln)}">${esc(ln)}</div></td>
+    h = cfg.layers.length ? `<table class="t"><thead><tr>${th}<th>Name</th><th>Enabled</th><th>Type</th><th>Connection</th><th>Layer name</th><th>On at start</th><th>Status</th><th><span class="vh">Actions</span></th></tr></thead><tbody>${
+      cfg.layers.map(l => { const ln = l.type === 'google' ? (GOVERLAYS.find(o => o[0] === l.overlay)?.[1] || '') : l.layerName; return `<tr ${rowAttrs(l, true)}>${handle(l)}${nameCell(l.id, l.name, `<span class="sw" style="background:${esc(layerColor(l))}"></span>`, bi(l) + connHidden(l))}${enCell(l)}<td><span class="chip ${l.type}">${l.type.toUpperCase()}</span></td><td>${esc(conn(l.conn)?.name || '—')}</td><td><div class="sub-txt" title="${esc(ln)}">${esc(ln)}</div></td>
         <td><button class="tgl" type="button" role="switch" aria-checked="${!!l.visible}" aria-label="${esc(l.name)} on at start" data-vis="${l.id}"><span class="tr"></span><span class="th"></span></button></td><td>${stat(l.id)}</td>${acts('layer', l.id)}</tr>`; }).join('')}</tbody></table>`
       : nodata('No layers yet', 'Layers are the WMS images and WFS features drawn over the basemap.', 'Add layer');
   }
@@ -1499,7 +1555,8 @@ $('tableBox').addEventListener('click', async e => {
   const kind = kindOfTab(), list = listFor(kind);
   const t = e.target.closest('button');
   if (t && t.dataset.add) return openEditor(kind, null);
-  if (t && t.dataset.def) { cfg.defaultBasemap = t.dataset.def; save(); render(); rebuildMap(); toast(cfg.basemaps.find(b => b.id === t.dataset.def).name + ' is now the default basemap'); return; }
+  if (t && t.dataset.handle) return;  // the drag handle only reorders
+  if (t && t.dataset.en) return setEnabled(kind, list.find(x => x.id === t.dataset.en));
   if (t && t.dataset.vis) {
     const l = cfg.layers.find(x => x.id === t.dataset.vis); l.visible = !l.visible; save(); render(); setLayerVisible(l, l.visible); renderPanel(); return;
   }
@@ -1513,14 +1570,75 @@ $('tableBox').addEventListener('click', async e => {
   if (row) openEditor(kind, list.find(x => x.id === row.dataset.row));
 });
 
+function setEnabled(kind, item) {
+  const prevDefault = defaultBase();
+  item.enabled = !isOn(item);
+  save(); render(); rebuildMap();
+  let msg = `${item.name} is ${item.enabled ? 'enabled' : 'disabled and hidden from operators'}`;
+  if (kind === 'connection' && !item.enabled) {
+    const n = cfg.basemaps.filter(b => b.conn === item.id).length + cfg.layers.filter(l => l.conn === item.id).length;
+    if (n) msg += `, with the ${n} basemap(s) and layer(s) that use it`;
+  }
+  const nowDefault = defaultBase();
+  if (nowDefault !== prevDefault) msg += nowDefault ? `. ${nowDefault.name} is now the default basemap` : '. No enabled basemap is left';
+  toast(msg, item.enabled ? 'success' : 'info');
+}
+
+/* ---------- reorder: drag rows, or focus a handle and use the arrow keys ---------- */
+let dragId = null;
+function moveItem(kind, id, toIndex) {
+  const list = listFor(kind), from = list.findIndex(x => x.id === id);
+  if (from < 0) return;
+  const prevDefault = defaultBase();
+  const [it] = list.splice(from, 1);
+  list.splice(Math.max(0, Math.min(list.length, toIndex)), 0, it);
+  save(); render(); rebuildMap();
+  const nowDefault = defaultBase();
+  if (kind === 'basemap' && nowDefault !== prevDefault && nowDefault) toast(`${nowDefault.name} is now the default basemap`);
+}
+const clearDropMarks = () => $('tableBox').querySelectorAll('.drop-before,.drop-after,.dragging').forEach(r => r.classList.remove('drop-before', 'drop-after', 'dragging'));
+$('tableBox').addEventListener('dragstart', e => {
+  const tr = e.target.closest && e.target.closest('tr[draggable]'); if (!tr) return;
+  dragId = tr.dataset.row; tr.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId);
+});
+$('tableBox').addEventListener('dragover', e => {
+  const tr = e.target.closest('tr[draggable]'); if (!dragId || !tr) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const r = tr.getBoundingClientRect(), after = e.clientY > r.top + r.height / 2;
+  $('tableBox').querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  if (tr.dataset.row !== dragId) tr.classList.add(after ? 'drop-after' : 'drop-before');
+});
+$('tableBox').addEventListener('drop', e => {
+  const tr = e.target.closest('tr[draggable]'); if (!dragId || !tr) return;
+  e.preventDefault();
+  const kind = kindOfTab(), list = listFor(kind);
+  const after = tr.classList.contains('drop-after');
+  const from = list.findIndex(x => x.id === dragId);
+  let to = list.findIndex(x => x.id === tr.dataset.row) + (after ? 1 : 0);
+  if (from < to) to -= 1;
+  const id = dragId; dragId = null; clearDropMarks();
+  if (tr.dataset.row !== id && to !== from) moveItem(kind, id, to);
+});
+$('tableBox').addEventListener('dragend', () => { dragId = null; clearDropMarks(); });
+$('tableBox').addEventListener('keydown', e => {
+  const h = e.target.closest('[data-handle]'); if (!h || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const kind = kindOfTab(), list = listFor(kind), id = h.dataset.handle, i = list.findIndex(x => x.id === id);
+  const to = i + (e.key === 'ArrowUp' ? -1 : 1);
+  if (to < 0 || to >= list.length) return;
+  moveItem(kind, id, to);
+  $('tableBox').querySelector(`[data-handle="${id}"]`)?.focus();
+});
+
 function askDelete(kind, item) {
+  if (item.system) return toast(`${item.name} is built in and can't be deleted. Disable it to hide it from operators.`, 'info');
   if (kind === 'connection') {
     const used = cfg.basemaps.filter(b => b.conn === item.id).length + cfg.layers.filter(l => l.conn === item.id).length;
-    if (used) return ask({ title: 'Connection in use', body: `${item.name} is used by ${used} basemap(s) or layer(s). Move or delete them first.`, yesText: 'OK', danger: false, onlyOk: true });
+    if (used) return ask({ title: 'Connection in use', body: `${item.name} is used by ${used} basemap(s) or layer(s). Move or delete them first, or disable the connection to hide them from operators.`, yesText: 'OK', danger: false, onlyOk: true });
   }
-  ask({ title: 'Delete ' + kind, body: `Are you sure you want to delete ${kind} ${item.name}?`, yes: () => {
+  ask({ title: 'Delete ' + kind, body: `Are you sure you want to delete ${kind} ${item.name}? To hide it from operators but keep it, disable it instead.`, yes: () => {
     const list = listFor(kind); list.splice(list.indexOf(item), 1);
-    if (kind === 'basemap' && cfg.defaultBasemap === item.id) cfg.defaultBasemap = cfg.basemaps[0]?.id;
     if (editing && editing.item === item) closeEditor();
     save(); render(); rebuildMap(); toast(item.name + ' was deleted');
   } });
@@ -1539,47 +1657,59 @@ function fieldsFor(kind, it) {
   if (kind === 'connection') {
     const a = it.auth || { type: 'none' }, g = it.google || {};
     return [
-      { k: 'provider', label: 'Provider', type: 'select', opts: [['generic', 'Generic (XYZ / WMS / WFS)'], ['google', 'Google Maps Platform']], v: it.provider || 'generic' },
+      it.system ? { k: 'provider', label: 'Provider', type: 'readonly', text: 'Google Maps Platform (built in)', v: 'google' }
+        : { k: 'provider', label: 'Provider', type: 'select', opts: [['generic', 'Generic (XYZ / WMS / WFS)'], ['google', 'Google Maps Platform']], v: it.provider || 'generic' },
       { k: 'name', label: 'Name', v: it.name, ph: 'Add name' },
       { k: 'url', label: 'Base URL', v: it.url, ph: 'https://', help: 'Server address. Basemaps and layers add their own path to it.', when: generic },
       { k: 'auth.type', label: 'Authentication', type: 'select', opts: Object.entries(AUTH_LABEL), v: a.type, when: generic },
       { row: [{ k: 'auth.param', label: 'Key parameter name', v: a.param || 'token', when: x => generic(x) && x.authType === 'key' }, { k: 'auth.key', label: 'API key', type: 'password', v: a.key, when: x => generic(x) && x.authType === 'key' }] },
       { row: [{ k: 'auth.user', label: 'Username', v: a.user, when: x => generic(x) && x.authType === 'basic' }, { k: 'auth.pass', label: 'Password', type: 'password', v: a.pass, when: x => generic(x) && x.authType === 'basic' }] },
       { k: 'auth.token', label: 'Token', type: 'password', v: a.token, when: x => generic(x) && x.authType === 'bearer' },
-      { k: 'google.key', label: 'API key', type: 'password', v: g.key, help: 'A Google Maps Platform key with the Map Tiles API enabled. Restrict it to your domains.', when: x => !generic(x) },
+      it.system ? { k: 'google.key', label: 'Test API key (prototype only)', type: 'password', v: g.key, help: 'In the product this connection uses Lumana\'s own key, which is never shown. Add a Map Tiles API key here only to preview Google maps in this prototype.' }
+        : { k: 'google.key', label: 'API key', type: 'password', v: g.key, help: 'A Google Maps Platform key with the Map Tiles API enabled. Restrict it to your domains.', when: x => !generic(x) },
       { row: [{ k: 'google.language', label: 'Language', v: g.language || 'en-US', ph: 'en-US', when: x => !generic(x) }, { k: 'google.region', label: 'Region', v: g.region || 'US', ph: 'US', when: x => !generic(x) }] },
-      { type: 'note', text: 'Google tiles are billed per session and per tile. Check the Map Tiles API policies before using them in production.', when: x => !generic(x) }
+      { type: 'note', text: 'Google tiles are billed per session and per tile. Check the Map Tiles API policies before using them in production.', when: x => !generic(x) },
+      { k: 'enabled', label: 'Enabled: visible to operators', type: 'toggle', v: it.enabled !== false }
     ];
   }
   if (kind === 'basemap') {
     const g = it.google || {};
     return [
       { k: 'name', label: 'Name', v: it.name, ph: 'Add name' },
-      { k: 'conn', label: 'Connection', type: 'select', opts: connOpts, v: it.conn },
+      it.system ? { k: 'conn', label: 'Connection', type: 'readonly', text: conn(it.conn)?.name || '', v: it.conn } : { k: 'conn', label: 'Connection', type: 'select', opts: connOpts, v: it.conn },
       { k: 'path', label: 'Tile path', v: it.path, ph: '/MapServer/tile/{z}/{y}/{x}', help: 'Added to the connection URL. Use {z}, {x} and {y}.', when: x => !x.google },
       { row: [{ k: 'maxzoom', label: 'Max zoom', type: 'number', v: it.maxzoom ?? 19, when: x => !x.google }, { k: 'attribution', label: 'Attribution', v: it.attribution, ph: 'Tiles © Provider', when: x => !x.google }] },
-      { k: 'google.mapType', label: 'Map type', type: 'select', opts: GMAPTYPES, v: g.mapType || 'roadmap', when: x => x.google },
+      it.system ? { k: 'google.mapType', label: 'Map type', type: 'readonly', text: (GMAPTYPES.find(m => m[0] === g.mapType) || [, ''])[1], v: g.mapType }
+        : { k: 'google.mapType', label: 'Map type', type: 'select', opts: GMAPTYPES, v: g.mapType || 'roadmap', when: x => x.google },
       { k: 'google.styles', label: 'Style (optional)', type: 'textarea', v: g.styles, ph: '[{"featureType":"poi","stylers":[{"visibility":"off"}]}]', help: 'Google map style JSON. Applies to Roadmap only.', when: x => x.google && x.mapType === 'roadmap' },
       { type: 'note', text: 'Max zoom and attribution come from Google automatically.', when: x => x.google },
-      { k: '__default', label: 'Default basemap, loads first', type: 'checkbox', v: editing.isDefault }
+      { k: 'enabled', label: 'Enabled: visible to operators', type: 'toggle', v: it.enabled !== false }
     ];
   }
   const gl = x => x.type === 'google';
   return [
     { k: 'name', label: 'Name', v: it.name, ph: 'Add name' },
-    { row: [{ k: 'type', label: 'Type', type: 'select', opts: [['wms', 'WMS (image)'], ['wfs', 'WFS (features)'], ['google', 'Google overlay']], v: it.type || 'wms' }, { k: 'conn', label: 'Connection', type: 'select', opts: connOpts, v: it.conn }] },
-    { k: 'overlay', label: 'Overlay', type: 'select', opts: GOVERLAYS, v: it.overlay || 'layerTraffic', when: gl },
+    ...(it.system ? [
+      { row: [{ k: 'type', label: 'Type', type: 'readonly', text: 'Google overlay', v: 'google' }, { k: 'conn', label: 'Connection', type: 'readonly', text: conn(it.conn)?.name || '', v: it.conn }] },
+      { k: 'overlay', label: 'Overlay', type: 'readonly', text: (GOVERLAYS.find(o => o[0] === it.overlay) || [, ''])[1], v: it.overlay }
+    ] : [
+      { row: [{ k: 'type', label: 'Type', type: 'select', opts: [['wms', 'WMS (image)'], ['wfs', 'WFS (features)'], ['google', 'Google overlay']], v: it.type || 'wms' }, { k: 'conn', label: 'Connection', type: 'select', opts: connOpts, v: it.conn }] },
+      { k: 'overlay', label: 'Overlay', type: 'select', opts: GOVERLAYS, v: it.overlay || 'layerTraffic', when: gl }
+    ]),
+    { type: 'note', text: 'Bicycling and transit come from the Google Maps JavaScript API. The Map Tiles API used by this preview does not offer them.', when: x => x.type === 'google' && ['bicycling', 'transit'].includes($('dBody').querySelector('[data-k="overlay"]')?.value) },
     { k: 'path', label: 'Service path (optional)', v: it.path, ph: '/wms', help: 'For example /wms or /wfs on a GeoServer', when: x => !gl(x) },
     { k: 'layerName', label: 'Layer name', v: it.layerName, ph: 'workspace:layer', help: 'As listed by the server, for example workspace:layer', when: x => !gl(x) },
     { k: 'format', label: 'Image format', type: 'select', opts: [['image/png', 'PNG (transparent)'], ['image/jpeg', 'JPEG']], v: it.format || 'image/png', when: x => x.type === 'wms' },
     { k: 'color', label: 'Color', type: 'color', v: it.color || '#4367f6', when: x => x.type === 'wfs' },
     { k: 'opacity', label: 'Opacity', type: 'range', v: it.opacity ?? 1 },
-    { k: 'visible', label: 'On when the map opens', type: 'toggle', v: it.visible !== false }
+    { k: 'visible', label: 'On when the map opens', type: 'toggle', v: it.visible !== false },
+    { k: 'enabled', label: 'Enabled: visible to operators', type: 'toggle', v: it.enabled !== false }
   ];
 }
 function fieldHtml(f) {
   const w = f.when ? ` data-when="${WHEN.push(f.when) - 1}"` : '';
   if (f.type === 'note') return `<div class="note"${w}>${esc(f.text)}</div>`;
+  if (f.type === 'readonly') return `<div class="field"${w}><span class="lbl">${esc(f.label)}</span><div class="ro">${esc(f.text)}</div><input type="hidden" data-k="${f.k}" value="${esc(f.v)}"></div>`;
   const id = 'f_' + f.k.replace('.', '_');
   if (f.type === 'checkbox') return `<label class="cb"${w}><input type="checkbox" id="${id}" data-k="${f.k}" ${f.v ? 'checked' : ''}><span style="font-weight:500">${esc(f.label)}</span></label>`;
   if (f.type === 'toggle') return `<div style="display:flex;align-items:center;gap:12px"${w}><button class="tgl" type="button" role="switch" id="${id}" data-k="${f.k}" aria-checked="${!!f.v}" aria-label="${esc(f.label)}"><span class="tr"></span><span class="th"></span></button><span>${esc(f.label)}</span></div>`;
@@ -1595,15 +1725,15 @@ function fieldHtml(f) {
 function openEditor(kind, item) {
   if (kind !== 'connection' && !cfg.connections.length) return toast('Add a connection first', 'info');
   const first = cfg.connections.find(c => !isGoogle(c))?.id || cfg.connections[0]?.id;
-  const blank = kind === 'connection' ? { provider: 'generic', name: '', url: '', auth: { type: 'none' }, google: { key: '', language: 'en-US', region: 'US' } }
-    : kind === 'basemap' ? { name: '', conn: first, path: '', maxzoom: 19, attribution: '', google: { mapType: 'roadmap', styles: '' } }
-    : { name: '', type: 'wms', conn: first, path: '', layerName: '', format: 'image/png', color: '#4367f6', overlay: 'layerTraffic', opacity: 1, visible: true };
-  editing = { kind, item, draft: item ? structuredClone(item) : blank, isDefault: kind === 'basemap' && (item ? cfg.defaultBasemap === item.id : !cfg.basemaps.length) };
+  const blank = kind === 'connection' ? { enabled: true, provider: 'generic', name: '', url: '', auth: { type: 'none' }, google: { key: '', language: 'en-US', region: 'US' } }
+    : kind === 'basemap' ? { enabled: true, name: '', conn: first, path: '', maxzoom: 19, attribution: '', google: { mapType: 'roadmap', styles: '' } }
+    : { enabled: true, name: '', type: 'wms', conn: first, path: '', layerName: '', format: 'image/png', color: '#4367f6', overlay: 'layerTraffic', opacity: 1, visible: true };
+  editing = { kind, item, draft: item ? structuredClone(item) : blank };
   WHEN = [];
   $('dTitle').textContent = item ? `Edit ${kind} ${item.name}` : `Add ${kind}`;
   $('dBody').innerHTML = `<div class="formerr" id="formErr" hidden></div>` + fieldsFor(kind, editing.draft).map(f => f.row ? `<div class="row2">${f.row.map(fieldHtml).join('')}</div>` : fieldHtml(f)).join('')
     + `<div class="testout" id="testOut" hidden></div>`;
-  $('dDelete').hidden = !item;
+  $('dDelete').hidden = !item || !!item.system;
   syncVisibility();
   $('drawer').hidden = false;
   render();
@@ -1645,7 +1775,6 @@ function readDraft() {
   const d = editing.draft;
   $('dBody').querySelectorAll('[data-k]').forEach(el => {
     const val = el.classList.contains('tgl') ? el.getAttribute('aria-checked') === 'true' : el.type === 'checkbox' ? el.checked : (el.type === 'number' || el.type === 'range') ? Number(el.value) : el.value.trim();
-    if (el.dataset.k === '__default') { editing.isDefault = val; return; }
     const [a, b] = el.dataset.k.split('.');
     if (b) { d[a] = d[a] || {}; d[a][b] = val; } else d[a] = val;
   });
@@ -1679,13 +1808,8 @@ $('dSave').onclick = () => {
   if (!d.name) { $('nameErr').hidden = false; $('f_name').closest('.field').classList.add('invalid'); $('f_name').focus(); return; }
   const err = validate(d);
   if (err) { $('formErr').textContent = err; $('formErr').hidden = false; $('dBody').scrollTop = 0; return; }
-  const { kind, item, isDefault } = editing, list = listFor(kind);
-  let id;
-  if (item) { Object.assign(item, d); id = item.id; } else { id = d.id = uid(); list.push(d); }
-  if (kind === 'basemap') {
-    if (isDefault) cfg.defaultBasemap = id;
-    else if (cfg.defaultBasemap === id || !cfg.defaultBasemap) cfg.defaultBasemap = cfg.basemaps.find(b => b.id !== id)?.id || id;
-  }
+  const { kind, item } = editing, list = listFor(kind);
+  if (item) Object.assign(item, d); else { d.id = uid(); list.push(d); }  // new items go to the bottom; drag to reorder
   save(); closeEditor(); rebuildMap();
   toast(`${d.name} was ${item ? 'updated' : 'added'}`);
 };
@@ -1709,13 +1833,19 @@ $('importFile').onchange = async e => {
   try {
     const c = JSON.parse(await e.target.files[0].text());
     if (!Array.isArray(c.connections) || !Array.isArray(c.basemaps) || !Array.isArray(c.layers)) throw 0;
-    cfg = c; save(); closeEditor(); rebuildMap(); toast('Configuration was imported');
+    cfg = normalize(c); save(); closeEditor(); rebuildMap(); toast('Configuration was imported');
   } catch (err) { toast('Not a valid config file', 'error'); }
   e.target.value = '';
 };
-$('resetBtn').onclick = () => ask({ title: 'Reset to samples', body: 'Are you sure you want to replace your connections, basemaps and layers with the sample setup?', yesText: 'Reset', yes: () => {
-  cfg = structuredClone(SAMPLE); Object.keys(status).forEach(k => delete status[k]); save(); closeEditor(); rebuildMap(); toast('Sample setup was restored');
+$('resetBtn').onclick = () => ask({ title: 'Reset to out of the box', body: 'Are you sure you want to replace your connections, basemaps and layers with the built-in Google Maps setup?', yesText: 'Reset', yes: () => {
+  cfg = outOfBox(); Object.keys(status).forEach(k => delete status[k]); save(); closeEditor(); rebuildMap(); toast('The out-of-the-box Google Maps setup was restored');
 } });
+$('demoBtn').onclick = () => {
+  let n = 0;
+  ['connections', 'basemaps', 'layers'].forEach(k => DEMO[k].forEach(x => { if (!cfg[k].some(y => y.id === x.id)) { cfg[k].push(structuredClone(x)); n++; } }));
+  save(); render(); rebuildMap();
+  toast(n ? `${n} demo connections, basemaps and layers were added at the bottom of each list` : 'The demo sources are already here', n ? 'success' : 'info');
+};
 
 /* =========================================================
    Map preview (live MapLibre)
@@ -1792,9 +1922,9 @@ async function rebuildMap() {
   if (map) { view = { center: map.getCenter().toArray(), zoom: map.getZoom() }; map.remove(); map = null; }
   Object.keys(loaded).forEach(k => delete loaded[k]);
   gAttrSession = null; updateGoogleAttr();
-  const b = cfg.basemaps.find(x => x.id === cfg.defaultBasemap) || cfg.basemaps[0];
+  const b = defaultBase();
   let base = null;
-  if (b && conn(b.conn)) { try { base = await basemapSource(b); } catch (e) { toast(`${b.name}: ${e.message}`, 'error'); } }
+  if (b && conn(b.conn)) { try { base = await basemapSource(b); } catch (e) { toast(`${b.name}: ${e.message}`, conn(b.conn).system && !conn(b.conn).google?.key ? 'info' : 'error'); } }
   if (my !== build) return;  // a newer rebuild started meanwhile
   const style = { version: 8, sources: {}, layers: [] };
   if (base) { style.sources.basemap = base.src; style.layers.push({ id: 'basemap', type: 'raster', source: 'basemap' }); gAttrSession = base.google; }
@@ -1802,10 +1932,15 @@ async function rebuildMap() {
   map = new maplibregl.Map({ container: 'map', style, center: view.center, zoom: view.zoom, maxZoom: 22, transformRequest, attributionControl: { compact: true } });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
   map.addControl(new maplibregl.ScaleControl(), 'bottom-right');
-  map.on('load', () => {
-    cfg.layers.filter(l => l.type === 'google' && isGoogle(conn(l.conn))).forEach(addGoogleOverlay);
-    cfg.layers.filter(l => l.type === 'wms' && conn(l.conn) && !isGoogle(conn(l.conn))).forEach(addWms);
-    cfg.layers.filter(l => l.type === 'wfs' && conn(l.conn) && !isGoogle(conn(l.conn))).forEach(addWfs);
+  // add layers as soon as the style is ready, without waiting for basemap tiles (a slow tile server must not hold them back)
+  map.once('style.load', () => {
+    // enabled layers only, each slotted by its place in the list (top of the list = drawn on top)
+    cfg.layers.filter(live).forEach(l => {
+      const g = isGoogle(conn(l.conn));
+      if (l.type === 'google' && g) addGoogleOverlay(l);
+      else if (l.type === 'wms' && !g) addWms(l);
+      else if (l.type === 'wfs' && !g) addWfs(l);
+    });
     updateGoogleAttr();
   });
   map.on('moveend', updateGoogleAttr);
@@ -1822,21 +1957,29 @@ async function switchBasemap(id) {
   map.addLayer({ id: 'basemap', type: 'raster', source: 'basemap' }, map.getStyle().layers[0]?.id);
   gAttrSession = base.google; updateGoogleAttr();
 }
-const firstVectorId = () => map.getStyle().layers.find(x => x.id.startsWith('wfs-'))?.id;
+// map layer ids of a configured layer, bottom to top
+const mapIdsOf = l => l.type === 'wfs' ? ['wfs-' + l.id + '-fill', 'wfs-' + l.id + '-line', 'wfs-' + l.id + '-pt'] : [(l.type === 'wms' ? 'wms-' : 'gov-') + l.id];
+// insert below the nearest layer that sits above this one in the list and is already on the map
+function beforeIdFor(l) {
+  const i = cfg.layers.findIndex(x => x.id === l.id);
+  for (let j = i - 1; j >= 0; j--) { const id = mapIdsOf(cfg.layers[j]).find(x => map.getLayer(x)); if (id) return id; }
+  return undefined;
+}
 function addWms(l) {
   map.addSource('wms-' + l.id, { type: 'raster', tiles: [wmsTileUrl(l)], tileSize: 256 });
-  map.addLayer({ id: 'wms-' + l.id, type: 'raster', source: 'wms-' + l.id, layout: { visibility: l.visible ? 'visible' : 'none' }, paint: { 'raster-opacity': l.opacity ?? 1 } }, firstVectorId());
+  map.addLayer({ id: 'wms-' + l.id, type: 'raster', source: 'wms-' + l.id, layout: { visibility: l.visible ? 'visible' : 'none' }, paint: { 'raster-opacity': l.opacity ?? 1 } }, beforeIdFor(l));
 }
 const gOverlaySessions = {};  // layer id -> session
 async function addGoogleOverlay(l) {
   const id = 'gov-' + l.id, mapAtStart = map;
+  if (!TILE_OVERLAYS.includes(l.overlay)) { setTimeout(() => setLayerStatus(l.id, 'run', JSAPI_NOTE), 0); return; }
   try {
     const s = await gSession(conn(l.conn), overlayBody(l));
     if (map !== mapAtStart || map.getSource(id)) return;
     gOverlaySessions[l.id] = s;
     map.addSource(id, { type: 'raster', tiles: [gTiles(s)], tileSize: Number(s.tileWidth) || 256, maxzoom: 22 });
     // Google overlays sit above the basemap and WMS images, under WFS features
-    map.addLayer({ id, type: 'raster', source: id, layout: { visibility: l.visible ? 'visible' : 'none' }, paint: { 'raster-opacity': l.opacity ?? 1 } }, firstVectorId());
+    map.addLayer({ id, type: 'raster', source: id, layout: { visibility: l.visible ? 'visible' : 'none' }, paint: { 'raster-opacity': l.opacity ?? 1 } }, beforeIdFor(l));
     setLayerStatus(l.id, 'ok', 'Google tiles');
     updateGoogleAttr();
   } catch (e) { setLayerStatus(l.id, 'err', e.message); }
@@ -1864,10 +2007,10 @@ function addWfs(l) {
   const src = 'wfs-' + l.id;
   map.addSource(src, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   const vis = l.visible ? 'visible' : 'none', c = l.color || '#4367f6', op = l.opacity ?? 1;
-  const [fill, line, pt] = wfsIds(l);
-  map.addLayer({ id: fill, type: 'fill', source: src, filter: ['==', ['geometry-type'], 'Polygon'], layout: { visibility: vis }, paint: { 'fill-color': c, 'fill-opacity': 0.25 * op } });
-  map.addLayer({ id: line, type: 'line', source: src, filter: ['!=', ['geometry-type'], 'Point'], layout: { visibility: vis }, paint: { 'line-color': c, 'line-width': 1.5, 'line-opacity': op } });
-  map.addLayer({ id: pt, type: 'circle', source: src, filter: ['==', ['geometry-type'], 'Point'], layout: { visibility: vis }, paint: { 'circle-color': c, 'circle-radius': 5, 'circle-stroke-color': '#101828', 'circle-stroke-width': 1, 'circle-opacity': op } });
+  const [fill, line, pt] = wfsIds(l), before = beforeIdFor(l);
+  map.addLayer({ id: fill, type: 'fill', source: src, filter: ['==', ['geometry-type'], 'Polygon'], layout: { visibility: vis }, paint: { 'fill-color': c, 'fill-opacity': 0.25 * op } }, before);
+  map.addLayer({ id: line, type: 'line', source: src, filter: ['!=', ['geometry-type'], 'Point'], layout: { visibility: vis }, paint: { 'line-color': c, 'line-width': 1.5, 'line-opacity': op } }, before);
+  map.addLayer({ id: pt, type: 'circle', source: src, filter: ['==', ['geometry-type'], 'Point'], layout: { visibility: vis }, paint: { 'circle-color': c, 'circle-radius': 5, 'circle-stroke-color': '#101828', 'circle-stroke-width': 1, 'circle-opacity': op } }, before);
   [fill, line, pt].forEach(id => {
     map.on('click', id, e => {
       const rows = Object.entries(e.features[0].properties).slice(0, 10).map(([k, v]) => `<tr><td style="color:var(--color-text-subtle)">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
@@ -1909,12 +2052,13 @@ function setLayerVisible(l, on, fit) {
 }
 function setLayerStatus(id, cls, text) { const el = $('ps-' + id); if (el) el.innerHTML = `<span class="dot ${cls}"></span>${esc(text)}`; }
 function renderPanel() {
-  $('pBase').innerHTML = cfg.basemaps.map(b => `<div class="pl"><label><input class="radio" type="radio" name="pbase" value="${b.id}" ${b.id === cfg.defaultBasemap ? 'checked' : ''}><span class="nm">${esc(b.name)}</span>${isGoogle(conn(b.conn)) ? '<span class="typ">GOOGLE</span>' : ''}</label></div>`).join('') || '<div class="pl" style="color:var(--color-text-subtlest)">No basemaps</div>';
-  $('pLayers').innerHTML = cfg.layers.map(l => `<div class="pl">
+  const def = defaultBase();
+  $('pBase').innerHTML = cfg.basemaps.filter(live).map(b => `<div class="pl"><label><input class="radio" type="radio" name="pbase" value="${b.id}" ${b === def ? 'checked' : ''}><span class="nm">${esc(b.name)}</span>${isGoogle(conn(b.conn)) ? '<span class="typ">GOOGLE</span>' : ''}</label></div>`).join('') || '<div class="pl" style="color:var(--color-text-subtlest)">No enabled basemaps</div>';
+  $('pLayers').innerHTML = cfg.layers.filter(live).map(l => `<div class="pl">
       <label class="cb"><input type="checkbox" data-layer="${l.id}" ${l.visible ? 'checked' : ''}><span class="sw" style="background:${esc(layerColor(l))}"></span><span class="nm">${esc(l.name)}</span><span class="typ">${l.type.toUpperCase()}</span></label>
       <div class="st" id="ps-${l.id}"><span class="dot"></span>${l.type === 'wms' ? 'Server-rendered tiles' : l.type === 'google' ? (l.visible ? 'Loading…' : 'Off') : (l.visible ? 'Loading…' : 'Off')}</div>
       <input type="range" min="0" max="1" step="0.05" value="${l.opacity ?? 1}" data-op="${l.id}" aria-label="${esc(l.name)} opacity">
-    </div>`).join('') || '<div class="pl" style="color:var(--color-text-subtlest)">No layers</div>';
+    </div>`).join('') || '<div class="pl" style="color:var(--color-text-subtlest)">No enabled layers</div>';
 }
 $('legend').addEventListener('input', e => {
   const t = e.target;
